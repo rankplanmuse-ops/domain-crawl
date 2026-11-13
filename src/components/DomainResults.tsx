@@ -1,142 +1,147 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
+import { Loader2 } from "lucide-react";
 import { DomainCard } from "./DomainCard";
-import { Loader2, ChevronDown, ArrowUpDown } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-interface DomainResult {
-  domain: string;
-  price: string;
-  type: "available" | "premium" | "auction";
-  registrar?: string;
-  renewPrice?: string;
-  trustScore?: number;
-}
-
-type SortOption = "name" | "price" | "renewPrice" | "trustScore";
+import type { DomainResult } from "@/lib/domainTypes";
 
 interface DomainResultsProps {
-  availableDomains: DomainResult[];
-  premiumDomains: DomainResult[];
+  results: DomainResult[];
   isLoading: boolean;
-  onMoreResearch: () => void;
-  showMore: boolean;
 }
 
-const parsePrice = (price: string): number => {
-  const num = parseFloat(price.replace(/[^0-9.]/g, ""));
-  return isNaN(num) ? 0 : num;
+type GroupKey = "available" | "parked" | "registered" | "aftermarket" | "unconfirmed";
+
+interface ResultGroup {
+  key: GroupKey;
+  title: string;
+  description: string;
+  domains: DomainResult[];
+}
+
+function groupFor(domain: DomainResult): GroupKey {
+  if (domain.bucket === "aftermarket") return "aftermarket";
+  if (domain.status === "registered" && domain.parked !== "none") return "parked";
+  if (
+    domain.status === "available" ||
+    domain.status === "premium" ||
+    domain.status === "premium-possible"
+  ) {
+    return "available";
+  }
+  if (domain.status === "registered") return "registered";
+  return "unconfirmed";
+}
+
+const GROUP_COPY: Record<GroupKey, { title: string; description: string }> = {
+  available: {
+    title: "Available, registry clear",
+    description:
+      "No registry record was returned. Some TLDs can still apply premium or reserved pricing, so confirm the final price at a registrar.",
+  },
+  parked: {
+    title: "Parked",
+    description:
+      "Registered names whose nameservers point to a parking or sale lander pattern. Treat this as a signal, not proof that the owner will sell.",
+  },
+  registered: {
+    title: "Registered",
+    description: "The registry returned a live domain record for these names.",
+  },
+  aftermarket: {
+    title: "Aftermarket ideas",
+    description:
+      "Short, one-word, or dictionary-led ideas are shown as purchase or inspiration candidates because comparable .com names are almost always registered.",
+  },
+  unconfirmed: {
+    title: "Status not confirmed",
+    description:
+      "RDAP did not produce a definitive answer for these names, or the TLD has no public RDAP endpoint in the IANA bootstrap.",
+  },
 };
 
-export function DomainResults({
-  availableDomains,
-  premiumDomains,
-  isLoading,
-  onMoreResearch,
-  showMore,
-}: DomainResultsProps) {
-  const [sortBy, setSortBy] = useState<SortOption>("trustScore");
+const GROUP_ORDER: GroupKey[] = [
+  "available",
+  "parked",
+  "registered",
+  "aftermarket",
+  "unconfirmed",
+];
 
-  const sortDomains = (domains: DomainResult[]): DomainResult[] => {
-    return [...domains].sort((a, b) => {
-      switch (sortBy) {
-        case "name":
-          return a.domain.localeCompare(b.domain);
-        case "price":
-          return parsePrice(a.price) - parsePrice(b.price);
-        case "renewPrice":
-          return parsePrice(a.renewPrice || a.price) - parsePrice(b.renewPrice || b.price);
-        case "trustScore":
-          return (b.trustScore || 0) - (a.trustScore || 0);
-        default:
-          return 0;
-      }
-    });
-  };
+export function DomainResults({ results, isLoading }: DomainResultsProps) {
+  const groups = useMemo<ResultGroup[]>(() => {
+    const grouped = new Map<GroupKey, DomainResult[]>();
+    for (const group of GROUP_ORDER) grouped.set(group, []);
 
-  const sortedAvailable = useMemo(() => sortDomains(availableDomains), [availableDomains, sortBy]);
-  const sortedPremium = useMemo(() => sortDomains(premiumDomains), [premiumDomains, sortBy]);
+    for (const result of results) {
+      grouped.get(groupFor(result))?.push(result);
+    }
+
+    return GROUP_ORDER.map((key) => ({
+      key,
+      ...GROUP_COPY[key],
+      domains: [...(grouped.get(key) ?? [])].sort((a, b) => {
+        const likelihood = (b.modelLikelihood ?? 0) - (a.modelLikelihood ?? 0);
+        return likelihood !== 0 ? likelihood : a.domain.localeCompare(b.domain);
+      }),
+    })).filter((group) => group.domains.length > 0);
+  }, [results]);
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 space-y-4">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-        <p className="text-muted-foreground">Researching domains...</p>
+      <div className="flex flex-col items-center justify-center space-y-4 py-16">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="space-y-1 text-center">
+          <p className="text-muted-foreground">Generating names and checking registry records...</p>
+          <p className="text-sm text-muted-foreground">
+            RDAP checks run in small batches to respect registry limits.
+          </p>
+        </div>
       </div>
     );
   }
 
-  if (availableDomains.length === 0 && premiumDomains.length === 0) {
-    return null;
+  if (results.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6 text-center text-muted-foreground">
+        No usable names came back. Try a clearer brief or broaden the generator settings.
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Sort Controls */}
-      <div className="flex items-center justify-end gap-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ArrowUpDown className="w-4 h-4" />
-          <span>Sort by:</span>
+    <div className="space-y-10">
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <h2 className="font-semibold text-foreground">Live status summary</h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          Statuses come from registry RDAP records. Prices appear only when the optional
+          Porkbun layer is configured and returns a quote.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {groups.map((group) => (
+            <span
+              key={group.key}
+              className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
+            >
+              {group.title}: {group.domains.length}
+            </span>
+          ))}
         </div>
-        <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
-          <SelectTrigger className="w-40 bg-card border-border">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="trustScore">Trust Score</SelectItem>
-            <SelectItem value="price">Price</SelectItem>
-            <SelectItem value="renewPrice">Renew Price</SelectItem>
-            <SelectItem value="name">Name</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      {sortedAvailable.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-available animate-pulse" />
-            <h2 className="text-lg font-semibold text-foreground">
-              Best Available Domains
-            </h2>
+      {groups.map((group) => (
+        <section key={group.key} className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">{group.title}</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              {group.description}
+            </p>
           </div>
           <div className="grid gap-3">
-            {sortedAvailable.slice(0, showMore ? undefined : 3).map((domain) => (
+            {group.domains.map((domain) => (
               <DomainCard key={domain.domain} {...domain} />
             ))}
           </div>
-        </div>
-      )}
-
-      {sortedPremium.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            <h2 className="text-lg font-semibold text-foreground">
-              Premium & Auction Domains
-            </h2>
-          </div>
-          <div className="grid gap-3">
-            {sortedPremium.slice(0, showMore ? undefined : 3).map((domain) => (
-              <DomainCard key={domain.domain} {...domain} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {(sortedAvailable.length > 3 || sortedPremium.length > 3) && !showMore && (
-        <button
-          onClick={onMoreResearch}
-          className="w-full py-3 rounded-xl border border-border bg-secondary/50 text-secondary-foreground font-medium transition-all duration-200 hover:bg-secondary flex items-center justify-center gap-2"
-        >
-          <span>More Research</span>
-          <ChevronDown className="w-4 h-4" />
-        </button>
-      )}
+        </section>
+      ))}
     </div>
   );
 }
