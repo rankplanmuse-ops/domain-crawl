@@ -1,0 +1,4 @@
+project_id = "umfzkqasgffkcqsqzbud"
+
+[functions.suggest-domains]
+verify_jwt = false
