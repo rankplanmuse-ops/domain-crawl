@@ -4,6 +4,8 @@ import { DomainEndingSelector } from "@/components/DomainEndingSelector";
 import { DomainResults } from "@/components/DomainResults";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { adaptLegacyResponse, type LegacyResponse } from "@/lib/liveBackend";
+import { applyRdapChecks } from "@/lib/rdap";
 import { cn } from "@/lib/utils";
 import type {
   AnalysisResult,
@@ -156,7 +158,7 @@ const Index = () => {
 
       if (error) throw error;
 
-      const response = data as SuggestDomainsResponse;
+      const response = data as LegacyResponse;
       if (response.error) {
         toast({
           title: "Error",
@@ -166,9 +168,17 @@ const Index = () => {
         return;
       }
 
-      setResults(response.results || []);
-      setAnalysis(response.analysis || null);
-      setLayers(response.layers || null);
+      // The live backend returns name ideas with unverified price and
+      // registrar claims. The adapter keeps only names and reasoning;
+      // every status shown comes from the RDAP pass below.
+      const adapted = adaptLegacyResponse(response);
+      setAnalysis(adapted.analysis);
+      setLayers({ rdap: true, porkbun: false });
+      const checked = await applyRdapChecks(
+        adapted.results,
+        adapted.aftermarketDomains
+      );
+      setResults(checked);
     } catch (error) {
       console.error("Error searching domains:", error);
       toast({
