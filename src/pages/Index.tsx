@@ -199,7 +199,7 @@ const Index = () => {
             <Globe className="h-4 w-4" />
             <span className="text-sm font-medium">Domain Research Tool</span>
           </div>
-          <h1 className="mb-4 text-4xl font-bold text-foreground sm:text-5xl">
+          <h1 className="mb-4 font-heading text-4xl font-bold uppercase tracking-wide text-foreground sm:text-5xl">
             Find Your Perfect
             <span className="gradient-primary bg-clip-text text-transparent"> Domain</span>
           </h1>

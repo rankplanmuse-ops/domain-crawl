@@ -101,6 +101,10 @@
 }
 
 @layer utilities {
+  .font-heading {
+    font-family: 'Oswald', sans-serif;
+  }
+
   .gradient-primary {
     background: var(--gradient-primary);
     -webkit-background-clip: text;
